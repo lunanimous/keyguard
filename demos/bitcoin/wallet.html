@@ -13,7 +13,8 @@
     <script src="TestData.js"></script>
     <script src="AddressUtils.js"></script>
     <script src="TxUtils.js"></script>
-    <script src="SmartBitApi.js"></script>
+    <script src="ElectrumWS.js"></script>
+    <script src="ElectrumApi.js"></script>
 
     <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
 </head>
@@ -37,12 +38,24 @@
         </div>
 
         <div>
+            <h2>
+                Chain Head:
+                <span v-if="head.height">#{{ head.height }} - {{ new Date(head.timestamp * 1000).toLocaleString() }}</span>
+                <span v-else>connecting...</span>
+            </h2>
+        </div>
+
+        <div>
             <h2>Balance: {{ balance / 1e5 }} mBTC = {{ balance / 1e8 }} BTC</h2>
         </div>
 
         <div>
-            <h2>Receive: <code>{{ nextReceivingAddress }}</code></h2>
-            <button @click="subscribeCurrentReceiveAddress">Subscribe</button>
+            <h2>Receive:
+                <code v-if="nextReceivingAddress">
+                    {{ nextReceivingAddress.address }} {{ nextReceivingAddress.index }}
+                </code>
+            </h2>
+            <button @click="subscribeAddress(nextReceivingAddress.address)">Subscribe</button>
         </div>
 
         <div>
@@ -68,7 +81,7 @@
                 <tbody>
                     <tr v-for="tx in txsArray" :key="tx.txid">
                         <td><code>{{ tx.txid }}</code></td>
-                        <td style="text-align: center;">{{ tx.confirmations }}</td>
+                        <td style="text-align: center;">{{ tx.block_height ? (head.height - tx.block_height + 1) : 0 }}</td>
                         <td style="text-align: center;">{{ tx.block_time ? new Date(tx.block_time * 1000).toLocaleString() : 'pending' }}</td>
                     </tr>
                 </tbody>
@@ -86,11 +99,20 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="out in utxos" :key="`${out.hash}:${out.index}`">
+                    <tr v-for="out in utxos" :key="`${out.hash}:${out.index}`" class="utxo"
+                        :class="{
+                            'pending': !txs[out.hash].block_height,
+                            'mined': txs[out.hash].block_height && head.height - txs[out.hash].block_height + 1 > 0 && head.height - txs[out.hash].block_height + 1 < 6,
+                            'confirmed': txs[out.hash].block_height && head.height - txs[out.hash].block_height + 1 >= 6,
+                        }"
+                    >
                         <td>{{ out.isInternal ? '(int)' : '(ext)' }}</td>
                         <td><code>{{ out.address }}</code></td>
                         <td style="text-align: right;">
                             {{ out.witnessUtxo.value / 1e5 }} mBTC
+                        </td>
+                        <td>
+                            <button @click="subscribeAddress(out.address)">Subscribe</button>
                         </td>
                     </tr>
                 </tbody>
@@ -99,5 +121,19 @@
     </div>
 
     <script src="wallet.js"></script>
+
+    <style>
+        .utxo.pending {
+            color: rgba(0, 0, 0, 0.6);
+        }
+
+        .utxo.mined {
+            background: gold;
+        }
+
+        .utxo.confirmed {
+            background: greenyellow;
+        }
+    </style>
 </body>
 </html>

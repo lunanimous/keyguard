@@ -159,7 +159,7 @@ class TxUtils {
     }
 }
 
-TxUtils.TX_BASE_VSIZE = 11;
+TxUtils.TX_BASE_VSIZE = 12;
 TxUtils.INPUT_VSIZE = 91;
 TxUtils.OUPUT_VSIZE = 32;
 

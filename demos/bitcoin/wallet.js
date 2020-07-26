@@ -26,6 +26,7 @@
  *     txid: string,
  *     block_height?: number,
  *     block_time?: number,
+ *     block_hash?: string,
  *     confirmations: number,
  *     version: number,
  *     seen_time: number,
@@ -36,14 +37,9 @@
  * } Transaction
  */
 
-async function updateAddressInfoActivity(addressInfo) {
-    /** @type {AddressStats} */
-    const stats = await SmartBit.fetchAddressStats(addressInfo.address);
-    addressInfo.active = !!stats.txCount;
-    return addressInfo;
-}
-
 INACTIVE_ADDRESS_GAP = 1; // As soon as one inactive address is found, search stops
+
+ElectrumApi.network = TEST.network;
 
 var app = new Vue({
     el: '#app',
@@ -61,6 +57,11 @@ var app = new Vue({
         txAmount: 0,
         txFeePerByte: 1,
         signedTx: '',
+
+        head: {
+            height: 0,
+            timestamp: 0,
+        },
     },
     computed: {
         seed() { // Nimiq.SerialBuffer
@@ -95,9 +96,7 @@ var app = new Vue({
         },
         txsArray() { // Array
             return Object.values(this.txs).sort((tx1, tx2) => {
-                const timestamp1 = tx1.confirmations ? tx1.block_height : Number.MAX_SAFE_INTEGER;
-                const timestamp2 = tx2.confirmations ? tx2.block_height : Number.MAX_SAFE_INTEGER;
-                return timestamp2 - timestamp1;
+                return (tx2.block_time || Number.MAX_SAFE_INTEGER) - (tx1.block_time || Number.MAX_SAFE_INTEGER);
             });
         },
         utxos() { // UTXO = Unspent TX Output
@@ -144,10 +143,10 @@ var app = new Vue({
                     hash: output.txid,
                     index: output.index,
                     witnessUtxo: {
-                        script: NodeBuffer.Buffer.from(output.script, 'hex'),
+                        script: NodeBuffer.Buffer.from(output.script),
                         value: output.value,
                     },
-                    // Extra properties requried for tx building to work:
+                    // Extra properties required for tx building to work:
                     address,
                     isInternal: internalAddresses.includes(address),
                 });
@@ -188,12 +187,10 @@ var app = new Vue({
                     continue;
                 }
 
-                await updateAddressInfoActivity(addressInfo);
+                await this.updateAddressInfoActivity(addressInfo);
 
                 if (!addressInfo.active) inactiveAddressGapWidth++;
                 if (inactiveAddressGapWidth >= INACTIVE_ADDRESS_GAP) break;
-
-                await this.fetchTxHistory(addressInfo.address);
             }
 
             while (inactiveAddressGapWidth < INACTIVE_ADDRESS_GAP) {
@@ -202,22 +199,22 @@ var app = new Vue({
                 const node = xPub
                     .derive(0) // 0 for external addresses
                     .derive(index);
-                const address = nodeToNestedWitnessAddress(node);
+                const scriptPubKey = nodeToNestedWitnessScriptPubKey(node);
+                const address = scriptPubKeyToAddress(scriptPubKey);
 
                 const addressInfo = {
+                    scriptPubKey,
                     address,
                     index,
                     active: false,
                 };
-                await updateAddressInfoActivity(addressInfo);
+                await this.updateAddressInfoActivity(addressInfo);
 
                 // Store address
                 this.ext_addresses.push(addressInfo);
 
                 if (!addressInfo.active) inactiveAddressGapWidth++;
                 if (inactiveAddressGapWidth >= INACTIVE_ADDRESS_GAP) break;
-
-                await this.fetchTxHistory(addressInfo.address);
             }
 
             /**
@@ -232,12 +229,10 @@ var app = new Vue({
                     continue;
                 }
 
-                await updateAddressInfoActivity(addressInfo);
+                await this.updateAddressInfoActivity(addressInfo);
 
                 if (!addressInfo.active) inactiveAddressGapWidth++;
                 if (inactiveAddressGapWidth >= INACTIVE_ADDRESS_GAP) break;
-
-                await this.fetchTxHistory(addressInfo.address);
             }
 
             while (inactiveAddressGapWidth < INACTIVE_ADDRESS_GAP) {
@@ -246,56 +241,104 @@ var app = new Vue({
                 const node = xPub
                     .derive(1) // 1 for internal addresses
                     .derive(index);
-                const address = nodeToNestedWitnessAddress(node);
+                const scriptPubKey = nodeToNestedWitnessScriptPubKey(node);
+                const address = scriptPubKeyToAddress(scriptPubKey);
 
                 const addressInfo = {
+                    scriptPubKey,
                     address,
                     index,
                     active: false,
                 };
-                await updateAddressInfoActivity(addressInfo);
+                await this.updateAddressInfoActivity(addressInfo);
 
                 // Store address
                 this.int_addresses.push(addressInfo);
 
                 if (!addressInfo.active) inactiveAddressGapWidth++;
                 if (inactiveAddressGapWidth >= INACTIVE_ADDRESS_GAP) break;
-
-                await this.fetchTxHistory(addressInfo.address);
             }
         },
     },
     mounted() {
         Nimiq.WasmHelper.doImport().then(() => this.isNimiqLoaded = true);
-        SmartBit.on('transaction-added', (tx) => this.addTransaction(tx));
-        SmartBit.on('transaction-mined', (partialTx) => this.updateTransaction(partialTx));
+        ElectrumApi.subscribeHeaders((header) => this.onHeadChanged(header));
     },
     methods: {
-        async fetchTxHistory(address) {
+        async updateAddressInfoActivity(addressInfo) {
+            // const balances = await ElectrumApi.getBalance(addressInfo.scriptPubKey);
+            console.log('Fetching tx history for', addressInfo.address);
+            const txCount = await this.fetchTxHistory(addressInfo.scriptPubKey);
+            addressInfo.active = /* balances.confirmed > 0 || balances.unconfirmed > 0 || */ txCount > 0;
+            return addressInfo;
+        },
+        async fetchTxHistory(scriptPubKey) {
             // Fetch tx history
-            const txs = await SmartBit.fetchTxs(address);
+            const txs = await ElectrumApi.getHistory(scriptPubKey);
+            console.log('Tx history:', txs);
             /** @type {{[hash: string]: Transaction}} */
             const txsObj = {};
             for (const tx of txs) {
-                if (!tx.block_height) {
-                    SmartBit.subscribeTransaction(tx.txid);
-                }
+                // if (!tx.block_height) {
+                //     SmartBit.subscribeTransaction(tx.txid);
+                // }
                 txsObj[tx.txid] = tx;
             }
             this.txs = {
                 ...this.txs,
                 ...txsObj,
             };
+
+            return txs.length;
+        },
+        async onStatusChanged(status) {
+            if (status === null) return; // No transactions
+
+            // Status is an array of {tx_hash, height} objects
+
+            // Compare status against known status, find new and updated transactions
+            const newTxs = [];
+            const changedTxs = [];
+            for (const entry of status) {
+                const knownTx = this.txs[entry.tx_hash];
+                if (!knownTx) newTxs.push(entry);
+                else if (knownTx.block_height !== entry.height) changedTxs.push(entry);
+            }
+
+            console.log(`onStatusChanged: found ${newTxs.length} new txs and ${changedTxs.length} changed txs`);
+
+            // Fetch new transactions
+            for (const entry of newTxs) {
+                ElectrumApi.getTransaction(entry.tx_hash, entry.height).then((tx) => this.addTransaction(tx));
+            }
+
+            // Fetch updated block header
+            for (const entry of changedTxs) {
+                ElectrumApi.getBlockHeader(entry.height).then((blockHeader) => {
+                    this.updateTransaction({
+                        txid: this.txs[entry.tx_hash].txid,
+                        block_height: entry.height,
+                        block_time: blockHeader.timestamp,
+                        block_hash: blockHeader.blockHash,
+                    });
+                });
+            }
+        },
+        async onHeadChanged(header) {
+            this.head = {
+                height: header.blockHeight,
+                timestamp: header.timestamp,
+            };
         },
         addTransaction(tx) {
             console.log('Adding transaction', tx);
             // Mark our output addresses as active
             for (const output of tx.outputs) {
-                let extOrInt = 0; // external
+                // let extOrInt = 0; // external
                 let addressInfo = this.ext_addresses.find(addrInfo => addrInfo.address === output.address);
                 if (!addressInfo) {
                     addressInfo = this.int_addresses.find(addrInfo => addrInfo.address === output.address);
-                    extOrInt = 1; // internal index
+                    // extOrInt = 1; // internal index
                 }
 
                 if (!addressInfo) continue;
@@ -306,7 +349,7 @@ var app = new Vue({
             this.$set(this.txs, tx.txid, tx);
         },
         updateTransaction(partialTx) {
-            console.debug('Updating transaction', partialTx);
+            console.log('Updating transaction', partialTx);
             const tx = this.txs[partialTx.txid];
             for(const key in partialTx) {
                 if (key === 'txid') continue;
@@ -353,19 +396,24 @@ var app = new Vue({
             this.signedTx = tx.toHex();
         },
         async broadcastTransaction() {
-            const response = await SmartBit.pushTx(this.signedTx);
-            console.log(response);
+            const tx = await ElectrumApi.broadcastTransaction(this.signedTx);
+            this.addTransaction(tx)
+            console.log(tx.txid);
 
-            alert('Broadcast: ' + response.success ? response.txid : response.error.message);
+            alert('Broadcast: ' + tx.txid);
 
             this.txTo = '';
             this.txAmount = 0;
             this.txFeePerByte = 1;
             this.signedTx = '';
         },
-        async subscribeCurrentReceiveAddress() {
+        async subscribeAddress(address) {
+            const addressInfo = this.int_addresses.find((addressInfo) => addressInfo.address === address)
+                || this.ext_addresses.find((addressInfo) => addressInfo.address === address)
+            const scriptPubKey = addressInfo.scriptPubKey;
+
             try {
-                await SmartBit.subscribeAddresses(this.nextReceivingAddress.address);
+                await ElectrumApi.subscribeStatus(scriptPubKey, (status) => this.onStatusChanged(status));
                 alert('Ok, subscribed');
             } catch (error) {
                 alert('Error: ' + error.message);
