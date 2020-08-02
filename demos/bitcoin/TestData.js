@@ -1,6 +1,6 @@
 // Segwit uses BIP84 to derive Bech32 addresses
 
-const DERIVATION_PATH_ACCOUNT = "m/84'/1'/0'"; // m/84'/1'/0'/0: 84' is for BIP84, 1' is for testnet, 0' is for account 0
+const DERIVATION_PATH_ACCOUNT = "m/49'/1'/0'"; // m/84'/1'/0'/0: 84' is for BIP84, 1' is for testnet, 0' is for account 0
 const DERIVATION_PATH_EXT = DERIVATION_PATH_ACCOUNT + "/0"; // 0 is for external (receiving)
 const DERIVATION_PATH_CHG = DERIVATION_PATH_ACCOUNT + "/1"; // 1 is for internal (change)
 
@@ -15,8 +15,10 @@ TEST.seed = '4e99e97cfb3dd66c0aff61be106a81f9adef10995a39d1bbf43e9b97bc456bee752
 TEST.network = {
     ...BitcoinJS.networks.testnet,
     bip32: { // See https://github.com/satoshilabs/slips/blob/master/slip-0132.md#registered-hd-version-bytes
-        public: 0x045f1cf6, // vpub
-        private: 0x045f18bc, // vprv
+        // public: 0x045f1cf6, // vpub (BIP84, native SegWit)
+        // private: 0x045f18bc, // vprv (BIP84, native SegWit)
+        public: 0x044a5262, // upub (BIP49, nested SegWit)
+        private: 0x044a4e28, // uprv (BIP49, nested SegWit)
     },
 };
 

@@ -52,7 +52,7 @@ async function pubKeyToHash(scriptPubKey) {
     return bytesToHex(reversed);
 }
 
-const ENDPOINT = 'wss://node.nimiq.watch:50002';
+const ENDPOINT = 'wss://api.nimiqwatch.com:50002';
 
 class ElectrumWS {
     constructor(endpoint = ENDPOINT, options = {}) {
