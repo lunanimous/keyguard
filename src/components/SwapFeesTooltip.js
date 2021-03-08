@@ -9,9 +9,10 @@
 class SwapFeesTooltip { // eslint-disable-line no-unused-vars
     /**
      * @param {Parsed<KeyguardRequest.SignSwapRequest>} request
-     * @param {number} exchangeAmount - In Luna or Satoshi, depending on which currency is funded
+     * @param {number} exchangeFromAmount - In Luna or Satoshi, depending on which currency is funded
+     * @param {number} exchangeToAmount - In Luna or Satoshi, depending on which currency is funded
      */
-    constructor(request, exchangeAmount) {
+    constructor(request, exchangeFromAmount, exchangeToAmount) {
         const {
             fund: fundTx,
             redeem: redeemTx,
@@ -69,10 +70,12 @@ class SwapFeesTooltip { // eslint-disable-line no-unused-vars
             const fiatRate = fundTx.type === 'EUR' ? fundingFiatRate : redeemingFiatRate;
             const fiatFee = this._unitsToCoins('EUR', myFee + theirFee) * fiatRate;
 
+            console.log(myFee + theirFee, fundTx.type === 'EUR' ? exchangeFromAmount : exchangeToAmount);
+
             const rows = this._createOasisLine(
                 fiatFee,
                 fiatCurrency,
-                (myFee + theirFee) / exchangeAmount,
+                (myFee + theirFee) / (fundTx.type === 'EUR' ? exchangeFromAmount : exchangeToAmount),
             );
             this.$tooltip.appendChild(rows[0]);
             this.$tooltip.appendChild(rows[1]);
@@ -106,7 +109,7 @@ class SwapFeesTooltip { // eslint-disable-line no-unused-vars
             const rows = this._createServiceFeeLine(
                 fiatFee,
                 fiatCurrency,
-                serviceSwapFee / (exchangeAmount - serviceSwapFee),
+                serviceSwapFee / ((exchangeFromAmount) - serviceSwapFee),
             );
             this.$tooltip.appendChild(rows[0]);
             this.$tooltip.appendChild(rows[1]);
